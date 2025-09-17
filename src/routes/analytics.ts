@@ -17,7 +17,7 @@ router.get('/kpi', async (req, res) => {
           WHERE d_located IS NOT NULL AND d_last_seen IS NOT NULL AND d_located >= d_last_seen
         ) AS median_days_missing,
         ROUND(
-          100.0 * COUNT(*) FILTER (WHERE d_located IS NULL) / NULLIF(COUNT(*), 0),
+          100.0 * COUNT(*) FILTER (WHERE d_located IS NULL AND d_last_seen IS NOT NULL) / NULLIF(COUNT(*), 0),
           2
         ) AS pct_still_missing
       FROM p;
@@ -360,6 +360,198 @@ router.get('/demographics/race', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching demographics by race:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/time-to-located-by-race', async (req, res) => {
+  try {
+    const query = `
+      WITH spans AS (
+        SELECT
+          CASE
+            WHEN d_located IS NULL AND d_last_seen IS NOT NULL THEN 'Still Missing'
+            WHEN d_located IS NOT NULL AND d_last_seen IS NOT NULL AND d_located >= d_last_seen THEN
+              CASE
+                WHEN (d_located - d_last_seen) BETWEEN 0 AND 1  THEN '0-1d'
+                WHEN (d_located - d_last_seen) BETWEEN 2 AND 7  THEN '2-7d'
+                WHEN (d_located - d_last_seen) BETWEEN 8 AND 20 THEN '8-20d'
+                WHEN (d_located - d_last_seen) BETWEEN 21 AND 89 THEN '21-89d'
+                WHEN (d_located - d_last_seen) >= 90           THEN '90+d'
+              END
+            ELSE 'Unknown/Invalid'
+          END AS bucket,
+          CASE
+            WHEN race ILIKE '%american indian%' OR race ILIKE '%alaskan native%'
+                 OR race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
+            WHEN race ILIKE '%asian%' OR race ILIKE '%pacific islander%'          THEN 'Asian / Pacific Islander'
+            WHEN race ILIKE '%white%'                                             THEN 'White'
+            WHEN race ILIKE '%black%'                                             THEN 'Black'
+            WHEN race IS NULL OR UPPER(TRIM(race)) IN ('', 'UNKNOWN', 'NOT AVAILABLE', 'N/A', 'NA')
+                                                                                  THEN 'Unknown'
+            ELSE 'Unknown'
+          END AS race_category
+        FROM missing_persons_parsed
+      )
+      SELECT
+        bucket,
+        race_category,
+        COUNT(*) AS count
+      FROM spans
+      WHERE bucket IS NOT NULL
+      GROUP BY bucket, race_category
+      ORDER BY CASE bucket
+        WHEN '0-1d' THEN 1
+        WHEN '2-7d' THEN 2
+        WHEN '8-20d' THEN 3
+        WHEN '21-89d' THEN 4
+        WHEN '90+d' THEN 5
+        WHEN 'Still Missing' THEN 6
+        ELSE 7
+      END, race_category;
+    `;
+
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching time to located by race:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/time-to-located-by-sex', async (req, res) => {
+  try {
+    const query = `
+      WITH spans AS (
+        SELECT
+          CASE
+            WHEN d_located IS NULL AND d_last_seen IS NOT NULL THEN 'Still Missing'
+            WHEN d_located IS NOT NULL AND d_last_seen IS NOT NULL AND d_located >= d_last_seen THEN
+              CASE
+                WHEN (d_located - d_last_seen) BETWEEN 0 AND 1  THEN '0-1d'
+                WHEN (d_located - d_last_seen) BETWEEN 2 AND 7  THEN '2-7d'
+                WHEN (d_located - d_last_seen) BETWEEN 8 AND 20 THEN '8-20d'
+                WHEN (d_located - d_last_seen) BETWEEN 21 AND 89 THEN '21-89d'
+                WHEN (d_located - d_last_seen) >= 90           THEN '90+d'
+              END
+            ELSE 'Unknown/Invalid'
+          END AS bucket,
+          CASE
+            WHEN UPPER(TRIM(sex)) IN ('MALE','M')   THEN 'Male'
+            WHEN UPPER(TRIM(sex)) IN ('FEMALE','F') THEN 'Female'
+            ELSE 'Unknown'
+          END AS sex_category
+        FROM missing_persons_parsed
+      )
+      SELECT
+        bucket,
+        sex_category,
+        COUNT(*) AS count
+      FROM spans
+      WHERE bucket IS NOT NULL
+      GROUP BY bucket, sex_category
+      ORDER BY CASE bucket
+        WHEN '0-1d' THEN 1
+        WHEN '2-7d' THEN 2
+        WHEN '8-20d' THEN 3
+        WHEN '21-89d' THEN 4
+        WHEN '90+d' THEN 5
+        WHEN 'Still Missing' THEN 6
+        ELSE 7
+      END, sex_category;
+    `;
+
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching time to located by sex:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/time-to-located-by-misstype', async (req, res) => {
+  try {
+    const query = `
+      WITH spans AS (
+        SELECT
+          CASE
+            WHEN d_located IS NULL AND d_last_seen IS NOT NULL THEN 'Still Missing'
+            WHEN d_located IS NOT NULL AND d_last_seen IS NOT NULL AND d_located >= d_last_seen THEN
+              CASE
+                WHEN (d_located - d_last_seen) BETWEEN 0 AND 1  THEN '0-1d'
+                WHEN (d_located - d_last_seen) BETWEEN 2 AND 7  THEN '2-7d'
+                WHEN (d_located - d_last_seen) BETWEEN 8 AND 20 THEN '8-20d'
+                WHEN (d_located - d_last_seen) BETWEEN 21 AND 89 THEN '21-89d'
+                WHEN (d_located - d_last_seen) >= 90           THEN '90+d'
+              END
+            ELSE 'Unknown/Invalid'
+          END AS bucket,
+          CASE
+            WHEN UPPER(TRIM(misstype)) = 'ADULT'    THEN 'Adult'
+            WHEN UPPER(TRIM(misstype)) = 'JUVENILE' THEN 'Juvenile'
+            ELSE 'Unknown'
+          END AS misstype_category
+        FROM missing_persons_parsed
+      )
+      SELECT
+        bucket,
+        misstype_category,
+        COUNT(*) AS count
+      FROM spans
+      WHERE bucket IS NOT NULL
+      GROUP BY bucket, misstype_category
+      ORDER BY CASE bucket
+        WHEN '0-1d' THEN 1
+        WHEN '2-7d' THEN 2
+        WHEN '8-20d' THEN 3
+        WHEN '21-89d' THEN 4
+        WHEN '90+d' THEN 5
+        WHEN 'Still Missing' THEN 6
+        ELSE 7
+      END, misstype_category;
+    `;
+
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching time to located by misstype:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/ncic-acic-status', async (req, res) => {
+  try {
+    const query = `
+      SELECT
+        'NCIC Entered' as category,
+        COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_entered)) = 'YES') AS yes_count,
+        COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_entered)) = 'NO') AS no_count
+      FROM missing_persons
+      UNION ALL
+      SELECT
+        'NCIC Cleared' as category,
+        COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_cleared)) = 'YES') AS yes_count,
+        COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_cleared)) = 'NO') AS no_count
+      FROM missing_persons
+      UNION ALL
+      SELECT
+        'ACIC Entered' as category,
+        COUNT(*) FILTER (WHERE UPPER(TRIM(acic_entered)) = 'YES') AS yes_count,
+        COUNT(*) FILTER (WHERE UPPER(TRIM(acic_entered)) = 'NO') AS no_count
+      FROM missing_persons
+      UNION ALL
+      SELECT
+        'ACIC Cleared' as category,
+        COUNT(*) FILTER (WHERE UPPER(TRIM(acic_cleared)) = 'YES') AS yes_count,
+        COUNT(*) FILTER (WHERE UPPER(TRIM(acic_cleared)) = 'NO') AS no_count
+      FROM missing_persons
+      ORDER BY category;
+    `;
+
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching NCIC/ACIC status data:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
