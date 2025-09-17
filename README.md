@@ -2,6 +2,8 @@
 
 Express.js TypeScript backend for serving Phoenix Police Department missing persons data analytics.
 
+**Disclaimer:** This project is for technical demonstration and civic awareness purposes. It is not intended to replace official reporting or investigative work.
+
 ## Setup
 
 1. Install dependencies:
