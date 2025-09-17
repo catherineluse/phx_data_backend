@@ -315,7 +315,9 @@ router.get('/demographics/race', async (req, res) => {
               THEN to_timestamp(btrim(reported_on), 'MM/DD/YYYY  HH12:MI AM')
             ELSE NULL
           END AS rpt_ts,
-          race
+          race,
+          ethnicity,
+          missing_per_rec
         FROM missing_persons
       ),
       bounds AS (
@@ -329,27 +331,31 @@ router.get('/demographics/race', async (req, res) => {
       ),
       norm AS (
         SELECT
-          date_trunc('month', rpt_ts)::date AS mon,
+          date_trunc('month', p.rpt_ts)::date AS mon,
           CASE
-            WHEN race ILIKE '%american indian%' OR race ILIKE '%alaskan native%'
-                 OR race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
-            WHEN race ILIKE '%asian%' OR race ILIKE '%pacific islander%'          THEN 'Asian / Pacific Islander'
-            WHEN race ILIKE '%white%'                                             THEN 'White'
-            WHEN race ILIKE '%black%'                                             THEN 'Black'
-            WHEN race IS NULL OR UPPER(TRIM(race)) IN ('', 'UNKNOWN', 'NOT AVAILABLE', 'N/A', 'NA')
+            WHEN p.race ILIKE '%american indian%' OR p.race ILIKE '%alaskan native%'
+                 OR p.race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
+            WHEN p.race ILIKE '%asian%' OR p.race ILIKE '%pacific islander%'          THEN 'Asian / Pacific Islander'
+            WHEN p.race ILIKE '%white%' AND UPPER(TRIM(p.ethnicity)) = 'HISPANIC'     THEN 'Hispanic White'
+            WHEN p.race ILIKE '%white%' AND UPPER(TRIM(p.ethnicity)) = 'NON-HISPANIC' THEN 'Non-Hispanic White'
+            WHEN p.race ILIKE '%white%'                                             THEN 'White (Ethnicity Unknown)'
+            WHEN p.race ILIKE '%black%'                                             THEN 'Black'
+            WHEN p.race IS NULL OR UPPER(TRIM(p.race)) IN ('', 'UNKNOWN', 'NOT AVAILABLE', 'N/A', 'NA')
                                                                                   THEN 'Unknown'
             ELSE 'Unknown'
-          END AS race5
-        FROM parsed
-        WHERE rpt_ts IS NOT NULL
+          END AS race_ethnicity
+        FROM parsed p
+        WHERE p.rpt_ts IS NOT NULL
       )
       SELECT
         m.mon,
-        COUNT(*) FILTER (WHERE n.race5 = 'White')                             AS "White",
-        COUNT(*) FILTER (WHERE n.race5 = 'Black')                             AS "Black",
-        COUNT(*) FILTER (WHERE n.race5 = 'Asian / Pacific Islander')          AS "Asian / Pacific Islander",
-        COUNT(*) FILTER (WHERE n.race5 = 'American Indian / Alaskan Native')  AS "American Indian / Alaskan Native",
-        COUNT(*) FILTER (WHERE n.race5 = 'Unknown')                           AS "Unknown"
+        COUNT(*) FILTER (WHERE n.race_ethnicity = 'Hispanic White')                    AS "Hispanic White",
+        COUNT(*) FILTER (WHERE n.race_ethnicity = 'Non-Hispanic White')               AS "Non-Hispanic White",
+        COUNT(*) FILTER (WHERE n.race_ethnicity = 'White (Ethnicity Unknown)')        AS "White (Ethnicity Unknown)",
+        COUNT(*) FILTER (WHERE n.race_ethnicity = 'Black')                            AS "Black",
+        COUNT(*) FILTER (WHERE n.race_ethnicity = 'Asian / Pacific Islander')         AS "Asian / Pacific Islander",
+        COUNT(*) FILTER (WHERE n.race_ethnicity = 'American Indian / Alaskan Native') AS "American Indian / Alaskan Native",
+        COUNT(*) FILTER (WHERE n.race_ethnicity = 'Unknown')                          AS "Unknown"
       FROM months m
       LEFT JOIN norm n ON n.mon = m.mon
       GROUP BY m.mon
@@ -370,28 +376,30 @@ router.get('/time-to-located-by-race', async (req, res) => {
       WITH spans AS (
         SELECT
           CASE
-            WHEN d_located IS NULL AND d_last_seen IS NOT NULL THEN 'Still Missing'
-            WHEN d_located IS NOT NULL AND d_last_seen IS NOT NULL AND d_located >= d_last_seen THEN
+            WHEN mpp.d_located IS NULL AND mpp.d_last_seen IS NOT NULL THEN 'Still Missing'
+            WHEN mpp.d_located IS NOT NULL AND mpp.d_last_seen IS NOT NULL AND mpp.d_located >= mpp.d_last_seen THEN
               CASE
-                WHEN (d_located - d_last_seen) BETWEEN 0 AND 1  THEN '0-1d'
-                WHEN (d_located - d_last_seen) BETWEEN 2 AND 7  THEN '2-7d'
-                WHEN (d_located - d_last_seen) BETWEEN 8 AND 20 THEN '8-20d'
-                WHEN (d_located - d_last_seen) BETWEEN 21 AND 89 THEN '21-89d'
-                WHEN (d_located - d_last_seen) >= 90           THEN '90+d'
+                WHEN (mpp.d_located - mpp.d_last_seen) BETWEEN 0 AND 1  THEN '0-1d'
+                WHEN (mpp.d_located - mpp.d_last_seen) BETWEEN 2 AND 7  THEN '2-7d'
+                WHEN (mpp.d_located - mpp.d_last_seen) BETWEEN 8 AND 20 THEN '8-20d'
+                WHEN (mpp.d_located - mpp.d_last_seen) BETWEEN 21 AND 89 THEN '21-89d'
+                WHEN (mpp.d_located - mpp.d_last_seen) >= 90           THEN '90+d'
               END
             ELSE 'Unknown/Invalid'
           END AS bucket,
           CASE
-            WHEN race ILIKE '%american indian%' OR race ILIKE '%alaskan native%'
-                 OR race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
-            WHEN race ILIKE '%asian%' OR race ILIKE '%pacific islander%'          THEN 'Asian / Pacific Islander'
-            WHEN race ILIKE '%white%'                                             THEN 'White'
-            WHEN race ILIKE '%black%'                                             THEN 'Black'
-            WHEN race IS NULL OR UPPER(TRIM(race)) IN ('', 'UNKNOWN', 'NOT AVAILABLE', 'N/A', 'NA')
+            WHEN mpp.race ILIKE '%american indian%' OR mpp.race ILIKE '%alaskan native%'
+                 OR mpp.race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
+            WHEN mpp.race ILIKE '%asian%' OR mpp.race ILIKE '%pacific islander%'          THEN 'Asian / Pacific Islander'
+            WHEN mpp.race ILIKE '%white%' AND UPPER(TRIM(mpp.ethnicity)) = 'HISPANIC'     THEN 'Hispanic White'
+            WHEN mpp.race ILIKE '%white%' AND UPPER(TRIM(mpp.ethnicity)) = 'NON-HISPANIC' THEN 'Non-Hispanic White'
+            WHEN mpp.race ILIKE '%white%'                                             THEN 'White (Ethnicity Unknown)'
+            WHEN mpp.race ILIKE '%black%'                                             THEN 'Black'
+            WHEN mpp.race IS NULL OR UPPER(TRIM(mpp.race)) IN ('', 'UNKNOWN', 'NOT AVAILABLE', 'N/A', 'NA')
                                                                                   THEN 'Unknown'
             ELSE 'Unknown'
           END AS race_category
-        FROM missing_persons_parsed
+        FROM missing_persons_parsed mpp
       )
       SELECT
         bucket,
