@@ -331,15 +331,13 @@ router.get('/demographics/race', async (req, res) => {
         SELECT
           date_trunc('month', rpt_ts)::date AS mon,
           CASE
-            WHEN race ILIKE '%american indian%' AND race ILIKE '%alaska%native%' THEN 'American Indian / Alaskan Native'
-            WHEN race ILIKE '%american indian%' AND race ILIKE '%alaskan native%' THEN 'American Indian / Alaskan Native'
-            WHEN race ILIKE '%native american%'                                   THEN 'American Indian / Alaskan Native'
-            WHEN race ILIKE '%asian%pacific islander%' OR race ILIKE '%asian /%pacific%'
-                 OR race ILIKE '%pacific islander%' OR race ILIKE '%asian%'       THEN 'Asian / Pacific Islander'
-            WHEN race ILIKE 'white%'                                              THEN 'White'
-            WHEN race ILIKE 'black%'                                              THEN 'Black'
-            WHEN race IS NULL OR btrim(race) = '' OR race ILIKE '%unknown%'
-                 OR race ILIKE '%not available%' OR race ILIKE '%n/a%'            THEN 'Unknown'
+            WHEN race ILIKE '%american indian%' OR race ILIKE '%alaskan native%'
+                 OR race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
+            WHEN race ILIKE '%asian%' OR race ILIKE '%pacific islander%'          THEN 'Asian / Pacific Islander'
+            WHEN race ILIKE '%white%'                                             THEN 'White'
+            WHEN race ILIKE '%black%'                                             THEN 'Black'
+            WHEN race IS NULL OR UPPER(TRIM(race)) IN ('', 'UNKNOWN', 'NOT AVAILABLE', 'N/A', 'NA')
+                                                                                  THEN 'Unknown'
             ELSE 'Unknown'
           END AS race5
         FROM parsed

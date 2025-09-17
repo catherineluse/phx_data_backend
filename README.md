@@ -41,7 +41,7 @@ The server will run on http://localhost:3001
 - `GET /api/analytics/monthly-reports` - Monthly reports with rolling averages
 - `GET /api/analytics/monthly-reports-with-anomaly` - Monthly reports with anomaly detection
 - `GET /api/analytics/time-to-located-histogram` - Time to located distribution
-- `GET /api/analytics/demographics/misstype` - Demographics by missing type
+- `GET /api/analytics/demographics/misstype` - Demographics by missing type (adult or juvenile)
 - `GET /api/analytics/demographics/sex` - Demographics by sex
 - `GET /api/analytics/demographics/race` - Demographics by race
 - `GET /health` - Health check endpoint
