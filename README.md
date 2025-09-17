@@ -53,3 +53,21 @@ Build and start:
 npm run build
 npm start
 ```
+
+## Table column names
+
+```
+CREATE TABLE missing_persons (
+    missing_per_rec text,
+    incident_num text,
+    reported_on date,
+    date_last_seen date,
+    date_located date,
+    ethnicity text,
+    race text,
+    sex text,
+    misstype text,
+    ncic_entered date,
+    ncic_cleared date
+);
+```

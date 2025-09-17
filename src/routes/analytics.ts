@@ -6,21 +6,16 @@ const router = express.Router();
 router.get('/kpi', async (req, res) => {
   try {
     const query = `
-      WITH p AS (
-        SELECT * FROM missing_persons_parsed
-      )
       SELECT
         COUNT(*) AS total_reports,
-        (
-          SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (d_located - d_last_seen))
-          FROM p
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (d_located - d_last_seen)) FILTER (
           WHERE d_located IS NOT NULL AND d_last_seen IS NOT NULL AND d_located >= d_last_seen
         ) AS median_days_missing,
         ROUND(
           100.0 * COUNT(*) FILTER (WHERE d_located IS NULL AND d_last_seen IS NOT NULL) / NULLIF(COUNT(*), 0),
           2
         ) AS pct_still_missing
-      FROM p;
+      FROM missing_persons_parsed;
     `;
 
     const result = await pool.query(query);
@@ -34,27 +29,11 @@ router.get('/kpi', async (req, res) => {
 router.get('/monthly-reports', async (req, res) => {
   try {
     const query = `
-      WITH parsed AS (
-        SELECT
-          CASE
-            WHEN upper(btrim("reported_on")) IN ('', 'NOT AVAILABLE', 'N/A', 'NA', 'UNKNOWN') THEN NULL
-            WHEN btrim("reported_on") ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{2}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim("reported_on"), 'MM/DD/YY  HH12:MI AM')
-            WHEN btrim("reported_on") ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim("reported_on"), 'MM/DD/YYYY  HH12:MI AM')
-            WHEN btrim("reported_on") ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{4}\\s*$'
-              THEN to_timestamp(btrim("reported_on") || ' 12:00 AM', 'MM/DD/YYYY  HH12:MI AM')
-            WHEN btrim("reported_on") ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{2}\\s*$'
-              THEN to_timestamp(btrim("reported_on") || ' 12:00 AM', 'MM/DD/YY  HH12:MI AM')
-            ELSE NULL
-          END AS rpt_ts
-        FROM missing_persons
-      ),
-      month_bounds AS (
+      WITH month_bounds AS (
         SELECT
           date_trunc('month', MIN(rpt_ts)) AS min_mon,
           date_trunc('month', MAX(rpt_ts)) AS max_mon
-        FROM parsed
+        FROM missing_persons_parsed
         WHERE rpt_ts IS NOT NULL
       ),
       month_series AS (
@@ -66,7 +45,7 @@ router.get('/monthly-reports', async (req, res) => {
         SELECT
           date_trunc('month', rpt_ts)::date AS mon,
           COUNT(*)::int AS reports
-        FROM parsed
+        FROM missing_persons_parsed
         WHERE rpt_ts IS NOT NULL
         GROUP BY 1
       )
@@ -98,25 +77,10 @@ router.get('/monthly-reports-with-anomaly', async (req, res) => {
   try {
     const query = `
       WITH base AS (
-        WITH parsed AS (
-          SELECT CASE
-            WHEN upper(btrim("reported_on")) IN ('', 'NOT AVAILABLE', 'N/A', 'NA', 'UNKNOWN') THEN NULL
-            WHEN btrim("reported_on") ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{2}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim("reported_on"), 'MM/DD/YY  HH12:MI AM')
-            WHEN btrim("reported_on") ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim("reported_on"), 'MM/DD/YYYY  HH12:MI AM')
-            WHEN btrim("reported_on") ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{4}\\s*$'
-              THEN to_timestamp(btrim("reported_on") || ' 12:00 AM', 'MM/DD/YYYY  HH12:MI AM')
-            WHEN btrim("reported_on") ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{2}\\s*$'
-              THEN to_timestamp(btrim("reported_on") || ' 12:00 AM', 'MM/DD/YY  HH12:MI AM')
-            ELSE NULL
-          END AS rpt_ts
-          FROM missing_persons
-        ),
-        month_bounds AS (
+        WITH month_bounds AS (
           SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
                  date_trunc('month', MAX(rpt_ts)) AS max_mon
-          FROM parsed
+          FROM missing_persons_parsed
           WHERE rpt_ts IS NOT NULL
         ),
         month_series AS (
@@ -126,7 +90,7 @@ router.get('/monthly-reports-with-anomaly', async (req, res) => {
         ),
         monthly_counts AS (
           SELECT date_trunc('month', rpt_ts)::date AS mon, COUNT(*)::int AS reports
-          FROM parsed
+          FROM missing_persons_parsed
           WHERE rpt_ts IS NOT NULL
           GROUP BY 1
         )
@@ -209,31 +173,26 @@ router.get('/time-to-located-histogram', async (req, res) => {
 router.get('/demographics/misstype', async (req, res) => {
   try {
     const query = `
-      WITH parsed AS (
+      WITH bounds AS (
+        SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
+               date_trunc('month', MAX(rpt_ts)) AS max_mon
+        FROM missing_persons_parsed
+        WHERE rpt_ts IS NOT NULL
+      ),
+      months AS (
+        SELECT gs::date AS mon
+        FROM bounds b CROSS JOIN generate_series(b.min_mon, b.max_mon, interval '1 month') gs
+      ),
+      parsed AS (
         SELECT
-          CASE
-            WHEN upper(btrim(reported_on)) IN ('', 'NOT AVAILABLE','N/A','NA','UNKNOWN') THEN NULL
-            WHEN btrim(reported_on) ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{2}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim(reported_on), 'MM/DD/YY  HH12:MI AM')
-            WHEN btrim(reported_on) ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim(reported_on), 'MM/DD/YYYY  HH12:MI AM')
-            ELSE NULL
-          END AS rpt_ts,
+          date_trunc('month', rpt_ts)::date AS mon,
           CASE
             WHEN upper(btrim(misstype)) = 'ADULT'    THEN 'Adult'
             WHEN upper(btrim(misstype)) = 'JUVENILE' THEN 'Juvenile'
             ELSE 'Unknown'
           END AS misstype_cat
-        FROM missing_persons
-      ),
-      bounds AS (
-        SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
-               date_trunc('month', MAX(rpt_ts)) AS max_mon
-        FROM parsed WHERE rpt_ts IS NOT NULL
-      ),
-      months AS (
-        SELECT gs::date AS mon
-        FROM bounds b CROSS JOIN generate_series(b.min_mon, b.max_mon, interval '1 month') gs
+        FROM missing_persons_parsed
+        WHERE rpt_ts IS NOT NULL
       )
       SELECT
         m.mon,
@@ -241,7 +200,7 @@ router.get('/demographics/misstype', async (req, res) => {
         COUNT(*) FILTER (WHERE p.misstype_cat = 'Juvenile') AS juvenile,
         COUNT(*) FILTER (WHERE p.misstype_cat = 'Unknown')  AS unknown
       FROM months m
-      LEFT JOIN parsed p ON date_trunc('month', p.rpt_ts)::date = m.mon
+      LEFT JOIN parsed p ON p.mon = m.mon
       GROUP BY m.mon
       ORDER BY m.mon;
     `;
@@ -257,31 +216,26 @@ router.get('/demographics/misstype', async (req, res) => {
 router.get('/demographics/sex', async (req, res) => {
   try {
     const query = `
-      WITH parsed AS (
+      WITH bounds AS (
+        SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
+               date_trunc('month', MAX(rpt_ts)) AS max_mon
+        FROM missing_persons_parsed
+        WHERE rpt_ts IS NOT NULL
+      ),
+      months AS (
+        SELECT gs::date AS mon
+        FROM bounds b CROSS JOIN generate_series(b.min_mon, b.max_mon, interval '1 month') gs
+      ),
+      parsed AS (
         SELECT
-          CASE
-            WHEN upper(btrim(reported_on)) IN ('', 'NOT AVAILABLE','N/A','NA','UNKNOWN') THEN NULL
-            WHEN btrim(reported_on) ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{2}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim(reported_on), 'MM/DD/YY  HH12:MI AM')
-            WHEN btrim(reported_on) ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim(reported_on), 'MM/DD/YYYY  HH12:MI AM')
-            ELSE NULL
-          END AS rpt_ts,
+          date_trunc('month', rpt_ts)::date AS mon,
           CASE
             WHEN upper(btrim(sex)) IN ('MALE','M')   THEN 'Male'
             WHEN upper(btrim(sex)) IN ('FEMALE','F') THEN 'Female'
             ELSE 'Unknown'
           END AS sex_cat
-        FROM missing_persons
-      ),
-      bounds AS (
-        SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
-               date_trunc('month', MAX(rpt_ts)) AS max_mon
-        FROM parsed WHERE rpt_ts IS NOT NULL
-      ),
-      months AS (
-        SELECT gs::date AS mon
-        FROM bounds b CROSS JOIN generate_series(b.min_mon, b.max_mon, interval '1 month') gs
+        FROM missing_persons_parsed
+        WHERE rpt_ts IS NOT NULL
       )
       SELECT
         m.mon,
@@ -289,7 +243,7 @@ router.get('/demographics/sex', async (req, res) => {
         COUNT(*) FILTER (WHERE p.sex_cat = 'Female') AS female,
         COUNT(*) FILTER (WHERE p.sex_cat = 'Unknown') AS unknown
       FROM months m
-      LEFT JOIN parsed p ON date_trunc('month', p.rpt_ts)::date = m.mon
+      LEFT JOIN parsed p ON p.mon = m.mon
       GROUP BY m.mon
       ORDER BY m.mon;
     `;
@@ -305,25 +259,11 @@ router.get('/demographics/sex', async (req, res) => {
 router.get('/demographics/race', async (req, res) => {
   try {
     const query = `
-      WITH parsed AS (
-        SELECT
-          CASE
-            WHEN upper(btrim(reported_on)) IN ('', 'NOT AVAILABLE','N/A','NA','UNKNOWN') THEN NULL
-            WHEN btrim(reported_on) ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{2}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim(reported_on), 'MM/DD/YY  HH12:MI AM')
-            WHEN btrim(reported_on) ~ '^\\s*\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*$'
-              THEN to_timestamp(btrim(reported_on), 'MM/DD/YYYY  HH12:MI AM')
-            ELSE NULL
-          END AS rpt_ts,
-          race,
-          ethnicity,
-          missing_per_rec
-        FROM missing_persons
-      ),
-      bounds AS (
+      WITH bounds AS (
         SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
                date_trunc('month', MAX(rpt_ts)) AS max_mon
-        FROM parsed WHERE rpt_ts IS NOT NULL
+        FROM missing_persons_parsed
+        WHERE rpt_ts IS NOT NULL
       ),
       months AS (
         SELECT gs::date AS mon
@@ -331,21 +271,21 @@ router.get('/demographics/race', async (req, res) => {
       ),
       norm AS (
         SELECT
-          date_trunc('month', p.rpt_ts)::date AS mon,
+          date_trunc('month', rpt_ts)::date AS mon,
           CASE
-            WHEN p.race ILIKE '%american indian%' OR p.race ILIKE '%alaskan native%'
-                 OR p.race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
-            WHEN p.race ILIKE '%asian%' OR p.race ILIKE '%pacific islander%'          THEN 'Asian / Pacific Islander'
-            WHEN p.race ILIKE '%white%' AND UPPER(TRIM(p.ethnicity)) = 'HISPANIC'     THEN 'Hispanic White'
-            WHEN p.race ILIKE '%white%' AND UPPER(TRIM(p.ethnicity)) = 'NON-HISPANIC' THEN 'Non-Hispanic White'
-            WHEN p.race ILIKE '%white%'                                             THEN 'White (Ethnicity Unknown)'
-            WHEN p.race ILIKE '%black%'                                             THEN 'Black'
-            WHEN p.race IS NULL OR UPPER(TRIM(p.race)) IN ('', 'UNKNOWN', 'NOT AVAILABLE', 'N/A', 'NA')
+            WHEN race ILIKE '%american indian%' OR race ILIKE '%alaskan native%'
+                 OR race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
+            WHEN race ILIKE '%asian%' OR race ILIKE '%pacific islander%'          THEN 'Asian / Pacific Islander'
+            WHEN race ILIKE '%white%' AND UPPER(TRIM(ethnicity)) = 'HISPANIC'     THEN 'Hispanic White'
+            WHEN race ILIKE '%white%' AND UPPER(TRIM(ethnicity)) = 'NON-HISPANIC' THEN 'Non-Hispanic White'
+            WHEN race ILIKE '%white%'                                             THEN 'White (Ethnicity Unknown)'
+            WHEN race ILIKE '%black%'                                             THEN 'Black'
+            WHEN race IS NULL OR UPPER(TRIM(race)) IN ('', 'UNKNOWN', 'NOT AVAILABLE', 'N/A', 'NA')
                                                                                   THEN 'Unknown'
             ELSE 'Unknown'
           END AS race_ethnicity
-        FROM parsed p
-        WHERE p.rpt_ts IS NOT NULL
+        FROM missing_persons_parsed
+        WHERE rpt_ts IS NOT NULL
       )
       SELECT
         m.mon,
@@ -530,29 +470,25 @@ router.get('/time-to-located-by-misstype', async (req, res) => {
 router.get('/ncic-acic-status', async (req, res) => {
   try {
     const query = `
-      SELECT
-        'NCIC Entered' as category,
-        COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_entered)) = 'YES') AS yes_count,
-        COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_entered)) = 'NO') AS no_count
-      FROM missing_persons
-      UNION ALL
-      SELECT
-        'NCIC Cleared' as category,
-        COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_cleared)) = 'YES') AS yes_count,
-        COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_cleared)) = 'NO') AS no_count
-      FROM missing_persons
-      UNION ALL
-      SELECT
-        'ACIC Entered' as category,
-        COUNT(*) FILTER (WHERE UPPER(TRIM(acic_entered)) = 'YES') AS yes_count,
-        COUNT(*) FILTER (WHERE UPPER(TRIM(acic_entered)) = 'NO') AS no_count
-      FROM missing_persons
-      UNION ALL
-      SELECT
-        'ACIC Cleared' as category,
-        COUNT(*) FILTER (WHERE UPPER(TRIM(acic_cleared)) = 'YES') AS yes_count,
-        COUNT(*) FILTER (WHERE UPPER(TRIM(acic_cleared)) = 'NO') AS no_count
-      FROM missing_persons
+      WITH counts AS (
+        SELECT
+          COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_entered)) = 'YES') AS ncic_entered_yes,
+          COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_entered)) = 'NO') AS ncic_entered_no,
+          COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_cleared)) = 'YES') AS ncic_cleared_yes,
+          COUNT(*) FILTER (WHERE UPPER(TRIM(ncic_cleared)) = 'NO') AS ncic_cleared_no,
+          COUNT(*) FILTER (WHERE UPPER(TRIM(acic_entered)) = 'YES') AS acic_entered_yes,
+          COUNT(*) FILTER (WHERE UPPER(TRIM(acic_entered)) = 'NO') AS acic_entered_no,
+          COUNT(*) FILTER (WHERE UPPER(TRIM(acic_cleared)) = 'YES') AS acic_cleared_yes,
+          COUNT(*) FILTER (WHERE UPPER(TRIM(acic_cleared)) = 'NO') AS acic_cleared_no
+        FROM missing_persons
+      )
+      SELECT * FROM (
+        VALUES
+          ('ACIC Cleared', (SELECT acic_cleared_yes FROM counts), (SELECT acic_cleared_no FROM counts)),
+          ('ACIC Entered', (SELECT acic_entered_yes FROM counts), (SELECT acic_entered_no FROM counts)),
+          ('NCIC Cleared', (SELECT ncic_cleared_yes FROM counts), (SELECT ncic_cleared_no FROM counts)),
+          ('NCIC Entered', (SELECT ncic_entered_yes FROM counts), (SELECT ncic_entered_no FROM counts))
+      ) AS results(category, yes_count, no_count)
       ORDER BY category;
     `;
 
