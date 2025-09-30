@@ -31,10 +31,10 @@ router.get('/monthly-reports', async (req, res) => {
     const query = `
       WITH month_bounds AS (
         SELECT
-          date_trunc('month', MIN(rpt_ts)) AS min_mon,
-          date_trunc('month', MAX(rpt_ts)) AS max_mon
+          date_trunc('month', MIN(reported_on)) AS min_mon,
+          date_trunc('month', MAX(reported_on)) AS max_mon
         FROM missing_persons_parsed
-        WHERE rpt_ts IS NOT NULL
+        WHERE reported_on IS NOT NULL
       ),
       month_series AS (
         SELECT gs::date AS mon
@@ -43,10 +43,10 @@ router.get('/monthly-reports', async (req, res) => {
       ),
       monthly_counts AS (
         SELECT
-          date_trunc('month', rpt_ts)::date AS mon,
+          date_trunc('month', reported_on)::date AS mon,
           COUNT(*)::int AS reports
         FROM missing_persons_parsed
-        WHERE rpt_ts IS NOT NULL
+        WHERE reported_on IS NOT NULL
         GROUP BY 1
       )
       SELECT
@@ -78,10 +78,10 @@ router.get('/monthly-reports-with-anomaly', async (req, res) => {
     const query = `
       WITH base AS (
         WITH month_bounds AS (
-          SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
-                 date_trunc('month', MAX(rpt_ts)) AS max_mon
+          SELECT date_trunc('month', MIN(reported_on)) AS min_mon,
+                 date_trunc('month', MAX(reported_on)) AS max_mon
           FROM missing_persons_parsed
-          WHERE rpt_ts IS NOT NULL
+          WHERE reported_on IS NOT NULL
         ),
         month_series AS (
           SELECT gs::date AS mon
@@ -89,9 +89,9 @@ router.get('/monthly-reports-with-anomaly', async (req, res) => {
           CROSS JOIN generate_series(mb.min_mon, mb.max_mon, interval '1 month') gs
         ),
         monthly_counts AS (
-          SELECT date_trunc('month', rpt_ts)::date AS mon, COUNT(*)::int AS reports
+          SELECT date_trunc('month', reported_on)::date AS mon, COUNT(*)::int AS reports
           FROM missing_persons_parsed
-          WHERE rpt_ts IS NOT NULL
+          WHERE reported_on IS NOT NULL
           GROUP BY 1
         )
         SELECT
@@ -174,10 +174,10 @@ router.get('/demographics/misstype', async (req, res) => {
   try {
     const query = `
       WITH bounds AS (
-        SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
-               date_trunc('month', MAX(rpt_ts)) AS max_mon
+        SELECT date_trunc('month', MIN(reported_on)) AS min_mon,
+               date_trunc('month', MAX(reported_on)) AS max_mon
         FROM missing_persons_parsed
-        WHERE rpt_ts IS NOT NULL
+        WHERE reported_on IS NOT NULL
       ),
       months AS (
         SELECT gs::date AS mon
@@ -185,14 +185,14 @@ router.get('/demographics/misstype', async (req, res) => {
       ),
       parsed AS (
         SELECT
-          date_trunc('month', rpt_ts)::date AS mon,
+          date_trunc('month', reported_on)::date AS mon,
           CASE
             WHEN upper(btrim(misstype)) = 'ADULT'    THEN 'Adult'
             WHEN upper(btrim(misstype)) = 'JUVENILE' THEN 'Juvenile'
             ELSE 'Unknown'
           END AS misstype_cat
         FROM missing_persons_parsed
-        WHERE rpt_ts IS NOT NULL
+        WHERE reported_on IS NOT NULL
       )
       SELECT
         m.mon,
@@ -217,10 +217,10 @@ router.get('/demographics/sex', async (req, res) => {
   try {
     const query = `
       WITH bounds AS (
-        SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
-               date_trunc('month', MAX(rpt_ts)) AS max_mon
+        SELECT date_trunc('month', MIN(reported_on)) AS min_mon,
+               date_trunc('month', MAX(reported_on)) AS max_mon
         FROM missing_persons_parsed
-        WHERE rpt_ts IS NOT NULL
+        WHERE reported_on IS NOT NULL
       ),
       months AS (
         SELECT gs::date AS mon
@@ -228,14 +228,14 @@ router.get('/demographics/sex', async (req, res) => {
       ),
       parsed AS (
         SELECT
-          date_trunc('month', rpt_ts)::date AS mon,
+          date_trunc('month', reported_on)::date AS mon,
           CASE
             WHEN upper(btrim(sex)) IN ('MALE','M')   THEN 'Male'
             WHEN upper(btrim(sex)) IN ('FEMALE','F') THEN 'Female'
             ELSE 'Unknown'
           END AS sex_cat
         FROM missing_persons_parsed
-        WHERE rpt_ts IS NOT NULL
+        WHERE reported_on IS NOT NULL
       )
       SELECT
         m.mon,
@@ -260,10 +260,10 @@ router.get('/demographics/race', async (req, res) => {
   try {
     const query = `
       WITH bounds AS (
-        SELECT date_trunc('month', MIN(rpt_ts)) AS min_mon,
-               date_trunc('month', MAX(rpt_ts)) AS max_mon
+        SELECT date_trunc('month', MIN(reported_on)) AS min_mon,
+               date_trunc('month', MAX(reported_on)) AS max_mon
         FROM missing_persons_parsed
-        WHERE rpt_ts IS NOT NULL
+        WHERE reported_on IS NOT NULL
       ),
       months AS (
         SELECT gs::date AS mon
@@ -271,7 +271,7 @@ router.get('/demographics/race', async (req, res) => {
       ),
       norm AS (
         SELECT
-          date_trunc('month', rpt_ts)::date AS mon,
+          date_trunc('month', reported_on)::date AS mon,
           CASE
             WHEN race ILIKE '%american indian%' OR race ILIKE '%alaskan native%'
                  OR race ILIKE '%native american%'                                THEN 'American Indian / Alaskan Native'
@@ -285,7 +285,7 @@ router.get('/demographics/race', async (req, res) => {
             ELSE 'Unknown'
           END AS race_ethnicity
         FROM missing_persons_parsed
-        WHERE rpt_ts IS NOT NULL
+        WHERE reported_on IS NOT NULL
       )
       SELECT
         m.mon,
